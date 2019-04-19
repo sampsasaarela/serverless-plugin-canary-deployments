@@ -24,9 +24,20 @@ class ServerlessCanaryDeployments {
     return this.service.provider.compiledCloudFormationTemplate;
   }
 
+  get hasDefaultPropertiesInGlobalSettings() {
+    return _.isObject(this.globalSettings) && Object.keys(this.globalSettings)
+      .some(name => name !== 'codeDeployRole' && name !== 'stages');
+  }
+
   get withDeploymentPreferencesFns() {
-    return this.serverless.service.getAllFunctions()
-      .filter(name => _.has('deploymentSettings', this.service.getFunction(name)));
+    const filter = (() => {
+      if (this.hasDefaultPropertiesInGlobalSettings) {
+        const ignoreFunctions = _.pathOr([], 'ignoreFunctions', this.globalSettings);
+        return name => ignoreFunctions.every(ignore => ignore !== name);
+      }
+      return name => _.has('deploymentSettings', this.service.getFunction(name));
+    })();
+    return this.serverless.service.getAllFunctions().filter(filter);
   }
 
   get globalSettings() {
@@ -298,9 +309,26 @@ class ServerlessCanaryDeployments {
     return _.head(_.keys(resource));
   }
 
+  validate(serverlessFunction, fnDeploymentSettings) {
+    if (!_.isString(fnDeploymentSettings.type)) {
+      throw new Error([
+        `Required string field "type" is missing in deploymentSettings for ${serverlessFunction}.`,
+        "It should be added to global deploymentSettings or each function's deploymentSettings."
+      ].join(' '));
+    }
+    if (!_.isString(fnDeploymentSettings.alias)) {
+      throw new Error([
+        `Required string field "alias" is missing in deploymentSettings for ${serverlessFunction}.`,
+        "It should be added to global deploymentSettings or each function's deploymentSettings."
+      ].join(' '));
+    }
+  }
+
   getDeploymentSettingsFor(serverlessFunction) {
     const fnDeploymentSetting = this.service.getFunction(serverlessFunction).deploymentSettings;
-    return Object.assign({}, this.globalSettings, fnDeploymentSetting);
+    const mergedDeploymentSetting = Object.assign({}, this.globalSettings, fnDeploymentSetting);
+    this.validate(serverlessFunction, mergedDeploymentSetting);
+    return mergedDeploymentSetting;
   }
 }
 
